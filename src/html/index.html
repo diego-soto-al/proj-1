@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>NOx Frontend Optimizado con Hora Opcional</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 0;
+      padding: 1rem;
+      font-family: sans-serif;
+    }
+    h1 { margin-bottom: 1rem; }
+    .controls {
+      margin-bottom: 1rem;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .chart-container {
+      width: 80%;
+      max-width: 1000px;
+      aspect-ratio: 16 / 9;
+      max-height: 80vh;
+    }
+    canvas {
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+</head>
+<body>
+  <h1>Serie Temporal de NOx</h1>
+
+  <div class="controls">
+    <label>
+      Inicio:
+      <input type="date" id="start">
+      <input type="time" id="startTime" placeholder="hh:mm">
+    </label>
+    <label>
+      Fin:
+      <input type="date" id="end">
+      <input type="time" id="endTime" placeholder="hh:mm">
+    </label>
+    <button onclick="updateChart()">Actualizar</button>
+  </div>
+
+  <div class="chart-container">
+    <canvas id="chart"></canvas>
+  </div>
+
+  <script>
+    let rawData = [];
+    let chart;
+
+    // Muestreo genérico
+    function sampleData(data, step) {
+      const sampled = [];
+      for (let i = 0; i < data.length; i += step) {
+        sampled.push(data[i]);
+      }
+      return sampled;
+    }
+
+    // Cargar datos CSV
+    async function loadData() {
+      try {
+        const response = await fetch("../../data/nox.csv");
+        const text = await response.text();
+
+        const rows = text.trim().split("\n").slice(1);
+        const parsed = [];
+
+        for (let i = 0; i < rows.length; i++) {
+          const cols = rows[i].split("\t");
+          if (cols.length < 3) continue;
+
+          const datetimeStr = cols[0] + "T" + cols[1];
+          const datetime = new Date(datetimeStr);
+          const value = parseFloat(cols[2]);
+
+          if (!isNaN(datetime) && !isNaN(value)) {
+            parsed.push({ datetime, value });
+          }
+        }
+
+        rawData = parsed.sort((a, b) => a.datetime - b.datetime);
+
+        const sampled = sampleData(rawData, 25);
+        drawChart(sampled);
+
+      } catch (err) {
+        console.error("Error cargando datos:", err);
+      }
+    }
+
+    // Dibujar gráfico
+    function drawChart(data) {
+      const labels = data.map(d =>
+        d.datetime.toISOString().slice(0,16).replace("T"," ")
+      );
+      const values = data.map(d => d.value);
+
+      if (chart) {
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = values;
+        chart.update();
+      } else {
+        chart = new Chart(document.getElementById("chart"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [{
+              label: "NOx",
+              data: values,
+              borderColor: "blue",
+              borderWidth: 1,
+              pointRadius: 0
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: { ticks: { maxTicksLimit: 10 } },
+              y: { title: { display: true, text: "Sample.Measurement" } }
+            }
+          }
+        });
+      }
+    }
+
+    // Actualizar gráfico según rango
+    function updateChart() {
+      const startInput = document.getElementById("start").value;
+      const startTime = document.getElementById("startTime").value;
+      const endInput = document.getElementById("end").value;
+      const endTime = document.getElementById("endTime").value;
+
+      if (!startInput || !endInput) {
+        alert("Debes seleccionar al menos las fechas");
+        return;
+      }
+
+      const startStr = startInput + "T" + (startTime ? startTime : "00:00");
+      const endStr = endInput + "T" + (endTime ? endTime : "23:59");
+
+      let start = new Date(startStr);
+      let end = new Date(endStr);
+
+      // Compensar GMT-3
+      const timezoneOffset = 3 * 60 * 60 * 1000; // 3 horas en milisegundos
+      start = new Date(start.getTime() - timezoneOffset);
+      end = new Date(end.getTime() - timezoneOffset);
+
+      const inRange = rawData.filter(d => d.datetime >= start && d.datetime <= end);
+
+      if (!inRange.length) {
+        alert("No hay datos en ese rango");
+        return;
+      }
+
+      const filtered = sampleData(inRange, 5);
+      drawChart(filtered);
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
